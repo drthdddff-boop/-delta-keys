@@ -1,236 +1,596 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DELTA.KEYS — Admin</title>
-  <link rel="stylesheet" href="/styles.css">
-</head>
+let credentials = null;
+let storeData = null;
 
-<body>
+const $ = (id) => document.getElementById(id);
 
-  <div class="page-bg"></div>
+function authHeaders() {
+  if (!credentials) return {};
 
-  <main class="container">
+  return {
+    Authorization:
+      "Basic " +
+      btoa(credentials.user + ":" + credentials.pass),
+    "Content-Type": "application/json"
+  };
+}
 
-    <!-- LOGIN -->
-    <section id="loginPanel" class="glass admin-login">
+async function api(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...authHeaders(),
+      ...(options.headers || {})
+    }
+  });
 
-      <h1>DELTA.KEYS</h1>
-      <p>Admin Dashboard</p>
+  const data = await response.json().catch(() => ({}));
 
-      <form id="loginForm">
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed");
+  }
 
-        <input
-          id="user"
-          type="text"
-          placeholder="Username"
-          autocomplete="username"
-          required
-        >
-
-        <input
-          id="pass"
-          type="password"
-          placeholder="Password"
-          autocomplete="current-password"
-          required
-        >
-
-        <button type="submit">
-          Login
-        </button>
-
-        <div id="loginError"></div>
-
-      </form>
-
-    </section>
+  return data;
+}
 
 
-    <!-- DASHBOARD -->
-    <section id="dashboard" hidden>
+// =========================
+// LOGIN
+// =========================
 
-      <div class="admin-header glass">
+$("loginForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const user = $("user").value.trim();
+  const pass = $("pass").value;
+
+  credentials = {
+    user,
+    pass
+  };
+
+  $("loginError").textContent = "";
+
+  try {
+    await loadDashboard();
+
+    $("loginPanel").hidden = true;
+    $("dashboard").hidden = false;
+
+  } catch (error) {
+
+    credentials = null;
+
+    $("loginError").textContent =
+      "Invalid username or password.";
+
+  }
+});
+
+
+// =========================
+// LOAD DASHBOARD
+// =========================
+
+async function loadDashboard() {
+
+  storeData = await api("/api/admin/data");
+
+  renderStats();
+  renderProducts();
+  renderOrders();
+
+}
+
+
+// =========================
+// STATS
+// =========================
+
+function renderStats() {
+
+  const products = storeData.products || [];
+  const orders = storeData.orders || [];
+
+  const active = products.filter(
+    product => product.active !== false
+  ).length;
+
+  const stock = products.reduce(
+    (total, product) =>
+      total + Number(product.stock || 0),
+    0
+  );
+
+  const pending = orders.filter(
+    order => order.status === "pending"
+  ).length;
+
+  $("stats").innerHTML = `
+
+    <div class="stat-card glass">
+      <span>Products</span>
+      <strong>${products.length}</strong>
+    </div>
+
+    <div class="stat-card glass">
+      <span>Active</span>
+      <strong>${active}</strong>
+    </div>
+
+    <div class="stat-card glass">
+      <span>Total Stock</span>
+      <strong>${stock}</strong>
+    </div>
+
+    <div class="stat-card glass">
+      <span>Pending Orders</span>
+      <strong>${pending}</strong>
+    </div>
+
+  `;
+}
+
+
+// =========================
+// PRODUCTS
+// =========================
+
+function renderProducts() {
+
+  const products = storeData.products || [];
+
+  if (!products.length) {
+
+    $("products").innerHTML =
+      "<p>No products yet.</p>";
+
+    return;
+  }
+
+  $("products").innerHTML = products.map(product => {
+
+    const stock = Number(product.stock || 0);
+
+    return `
+
+      <div class="admin-card glass">
 
         <div>
-          <h1>Admin Dashboard</h1>
-          <p>Manage products, stock and orders.</p>
+
+          <h3>${escapeHTML(product.name)}</h3>
+
+          <p>
+            ₹${Number(product.price || 0).toFixed(2)}
+          </p>
+
+          <p>
+            Stock:
+            <strong>${stock}</strong>
+          </p>
+
+          <p>
+            Status:
+            ${
+              product.active === false
+                ? "Inactive"
+                : "Active"
+            }
+          </p>
+
         </div>
 
-        <button id="logout">
-          Logout
-        </button>
+        <div class="admin-actions">
+
+          <button
+            onclick="editProduct('${product.id}')"
+          >
+            Edit
+          </button>
+
+          <button
+            onclick="deleteProduct('${product.id}')"
+          >
+            Delete
+          </button>
+
+        </div>
 
       </div>
 
+    `;
 
-      <!-- STATS -->
-      <div id="stats" class="stats-grid"></div>
+  }).join("");
+
+}
 
 
-      <!-- PRODUCTS -->
-      <section class="glass admin-section">
+// =========================
+// ADD PRODUCT
+// =========================
 
-        <div class="section-header">
+$("addProduct").onclick = () => {
 
-          <div>
-            <h2>Products & Stock</h2>
-            <p>Manage your digital products.</p>
-          </div>
+  $("productModalTitle").textContent =
+    "Add Product";
 
-          <button id="addProduct">
-            + Add Product
-          </button>
+  $("productId").value = "";
+  $("productName").value = "";
+  $("productPrice").value = "";
+  $("productDescription").value = "";
+  $("productBadge").value = "";
+  $("productStock").value = "0";
+  $("productActive").checked = true;
+  $("productKeys").value = "";
+
+  $("productModal").hidden = false;
+
+};
+
+
+// =========================
+// EDIT PRODUCT
+// =========================
+
+window.editProduct = function(id) {
+
+  const product =
+    (storeData.products || []).find(
+      item => item.id === id
+    );
+
+  if (!product) return;
+
+  $("productModalTitle").textContent =
+    "Edit Product";
+
+  $("productId").value = product.id;
+  $("productName").value = product.name || "";
+  $("productPrice").value = product.price || 0;
+  $("productDescription").value =
+    product.description || "";
+  $("productBadge").value =
+    product.badge || "";
+  $("productStock").value =
+    product.stock || 0;
+  $("productActive").checked =
+    product.active !== false;
+
+  $("productKeys").value =
+    (product.keys || []).join("\n");
+
+  $("productModal").hidden = false;
+
+};
+
+
+// =========================
+// SAVE PRODUCT
+// =========================
+
+$("productForm").addEventListener(
+  "submit",
+  async (event) => {
+
+    event.preventDefault();
+
+    const id = $("productId").value;
+
+    const keys = $("productKeys").value
+      .split("\n")
+      .map(key => key.trim())
+      .filter(Boolean);
+
+    const body = {
+
+      name: $("productName").value.trim(),
+
+      price: Number(
+        $("productPrice").value || 0
+      ),
+
+      description:
+        $("productDescription").value.trim(),
+
+      badge:
+        $("productBadge").value.trim(),
+
+      stock: Number(
+        $("productStock").value || 0
+      ),
+
+      active:
+        $("productActive").checked,
+
+      keys
+
+    };
+
+    try {
+
+      if (id) {
+
+        await api(
+          "/api/admin/products/" +
+          encodeURIComponent(id),
+          {
+            method: "PUT",
+            body: JSON.stringify(body)
+          }
+        );
+
+      } else {
+
+        await api(
+          "/api/admin/products",
+          {
+            method: "POST",
+            body: JSON.stringify(body)
+          }
+        );
+
+      }
+
+      $("productModal").hidden = true;
+
+      await loadDashboard();
+
+    } catch (error) {
+
+      alert(error.message);
+
+    }
+
+  }
+);
+
+
+// =========================
+// DELETE PRODUCT
+// =========================
+
+window.deleteProduct = async function(id) {
+
+  if (!confirm("Delete this product?")) {
+    return;
+  }
+
+  try {
+
+    await api(
+      "/api/admin/products/" +
+      encodeURIComponent(id),
+      {
+        method: "DELETE"
+      }
+    );
+
+    await loadDashboard();
+
+  } catch (error) {
+
+    alert(error.message);
+
+  }
+
+};
+
+
+// =========================
+// ORDERS
+// =========================
+
+function renderOrders() {
+
+  const orders = storeData.orders || [];
+
+  if (!orders.length) {
+
+    $("orders").innerHTML =
+      "<p>No orders yet.</p>";
+
+    return;
+  }
+
+  $("orders").innerHTML = orders.map(order => {
+
+    const product =
+      (storeData.products || []).find(
+        item => item.id === order.productId
+      );
+
+    return `
+
+      <div class="admin-card glass">
+
+        <div>
+
+          <h3>
+            ${escapeHTML(
+              product?.name || "Unknown Product"
+            )}
+          </h3>
+
+          <p>
+            Order ID:
+            ${escapeHTML(order.id)}
+          </p>
+
+          <p>
+            Customer:
+            ${escapeHTML(order.customerName || "")}
+          </p>
+
+          <p>
+            Payment Reference:
+            ${escapeHTML(order.paymentReference || "")}
+          </p>
+
+          <p>
+            Status:
+            <strong>
+              ${escapeHTML(order.status || "")}
+            </strong>
+          </p>
+
+          ${
+            order.key
+              ? `
+                <p>
+                  Delivered Key:
+                  <strong>${escapeHTML(order.key)}</strong>
+                </p>
+              `
+              : ""
+          }
 
         </div>
 
-        <div id="products"></div>
+        <div class="admin-actions">
 
-      </section>
+          ${
+            order.status === "pending"
+              ? `
+                <button
+                  onclick="approveOrder('${order.id}')"
+                >
+                  Approve
+                </button>
 
-
-      <!-- ORDERS -->
-      <section class="glass admin-section">
-
-        <div class="section-header">
-
-          <div>
-            <h2>Orders</h2>
-            <p>Approve or reject customer payments.</p>
-          </div>
-
-        </div>
-
-        <div id="orders"></div>
-
-      </section>
-
-    </section>
-
-  </main>
-
-
-  <!-- PRODUCT MODAL -->
-  <div id="productModal" class="modal" hidden>
-
-    <div class="modal-box glass">
-
-      <h2 id="productModalTitle">
-        Add Product
-      </h2>
-
-      <form id="productForm">
-
-        <input type="hidden" id="productId">
-
-        <label>
-          Product Name
-        </label>
-
-        <input
-          id="productName"
-          type="text"
-          required
-        >
-
-        <label>
-          Price
-        </label>
-
-        <input
-          id="productPrice"
-          type="number"
-          min="0"
-          step="0.01"
-          required
-        >
-
-        <label>
-          Description
-        </label>
-
-        <textarea
-          id="productDescription"
-          rows="3"
-        ></textarea>
-
-        <label>
-          Badge
-        </label>
-
-        <input
-          id="productBadge"
-          type="text"
-          placeholder="Popular"
-        >
-
-        <label>
-          Stock
-        </label>
-
-        <input
-          id="productStock"
-          type="number"
-          min="0"
-          step="1"
-          required
-        >
-
-        <label class="checkbox-row">
-
-          <input
-            id="productActive"
-            type="checkbox"
-            checked
-          >
-
-          Active Product
-
-        </label>
-
-        <label>
-          Digital Keys
-        </label>
-
-        <textarea
-          id="productKeys"
-          rows="8"
-          placeholder="Enter one key per line"
-        ></textarea>
-
-
-        <div class="modal-actions">
-
-          <button
-            type="button"
-            id="cancelProduct"
-          >
-            Cancel
-          </button>
-
-          <button type="submit">
-            Save Product
-          </button>
+                <button
+                  onclick="rejectOrder('${order.id}')"
+                >
+                  Reject
+                </button>
+              `
+              : ""
+          }
 
         </div>
 
-      </form>
+      </div>
 
-      <button
-        id="closeProductModal"
-        class="modal-close"
-        type="button"
-      >
-        ×
-      </button>
+    `;
 
-    </div>
+  }).join("");
 
-  </div>
+}
 
 
-  <script src="/admin.js"></script>
+// =========================
+// APPROVE ORDER
+// =========================
 
-</body>
-</html>
+window.approveOrder = async function(id) {
+
+  if (!confirm("Approve this order?")) {
+    return;
+  }
+
+  try {
+
+    await api(
+      "/api/admin/orders/" +
+      encodeURIComponent(id),
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          status: "approved"
+        })
+      }
+    );
+
+    await loadDashboard();
+
+  } catch (error) {
+
+    alert(error.message);
+
+  }
+
+};
+
+
+// =========================
+// REJECT ORDER
+// =========================
+
+window.rejectOrder = async function(id) {
+
+  if (!confirm("Reject this order?")) {
+    return;
+  }
+
+  try {
+
+    await api(
+      "/api/admin/orders/" +
+      encodeURIComponent(id),
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          status: "rejected",
+          key: ""
+        })
+      }
+    );
+
+    await loadDashboard();
+
+  } catch (error) {
+
+    alert(error.message);
+
+  }
+
+};
+
+
+// =========================
+// CLOSE MODAL
+// =========================
+
+$("closeProductModal").onclick = () => {
+
+  $("productModal").hidden = true;
+
+};
+
+
+$("cancelProduct").onclick = () => {
+
+  $("productModal").hidden = true;
+
+};
+
+
+// =========================
+// LOGOUT
+// =========================
+
+$("logout").onclick = () => {
+
+  credentials = null;
+  storeData = null;
+
+  $("dashboard").hidden = true;
+  $("loginPanel").hidden = false;
+
+  $("pass").value = "";
+
+};
+
+
+// =========================
+// ESCAPE HTML
+// =========================
+
+function escapeHTML(value) {
+
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+}
