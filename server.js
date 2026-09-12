@@ -777,15 +777,15 @@ HTML FALLBACK
 ========================================================= */
 
 app.get(
-"/",
-(req, res) => {
-res.sendFile(
-path.join(
-PUBLIC_DIR,
-"index.html"
-)
-);
-}
+  "/admin",
+  (req, res) => {
+    res.sendFile(
+      path.join(
+        PUBLIC_DIR,
+        "admin.html"
+      )
+    );
+  }
 );
 
 /* =========================================================
